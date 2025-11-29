@@ -1,8 +1,8 @@
 <?php
 /**
- * Forum v3.0 - Production Ready
- * Использует реальную структуру из forum_categories.json
- * С BBCode → HTML конвертером
+ * Forum v3.1 - Fixed Version
+ * Правильно использует структуру из forum_categories.json
+ * С поддержкой BBCode, иерархии категорий и всех функций
  */
 
 // ========================================
@@ -249,22 +249,13 @@ function convertBBCodeToHTML($content) {
     }
 
     try {
-        // Экранируем HTML
         $content = htmlspecialchars($content, ENT_QUOTES, 'UTF-8');
 
-        // [b]text[/b]
         $content = preg_replace('/$$b$$(.*?)$$\/b$$/is', '<strong>$1</strong>', $content);
-
-        // [i]text[/i]
         $content = preg_replace('/$$i$$(.*?)$$\/i$$/is', '<em>$1</em>', $content);
-
-        // [u]text[/u]
         $content = preg_replace('/$$u$$(.*?)$$\/u$$/is', '<u>$1</u>', $content);
-
-        // [s]text[/s]
         $content = preg_replace('/$$s$$(.*?)$$\/s$$/is', '<s>$1</s>', $content);
 
-        // [color=COLOR]text[/color]
         $content = preg_replace_callback('/$$color=(#?[a-fA-F0-9]{6}|#?[a-fA-F0-9]{3}|red|blue|green|yellow|orange|purple|pink|black|white|gray)$$(.*?)$$\/color$$/is', function($matches) {
             $color = $matches[1];
             if (strpos($color, '#') !== 0 && preg_match('/^[a-fA-F0-9]{3,6}$/', $color)) {
@@ -273,14 +264,12 @@ function convertBBCodeToHTML($content) {
             return '<span style="color:' . $color . '">' . $matches[2] . '</span>';
         }, $content);
 
-        // [size=SIZE]text[/size]
         $content = preg_replace_callback('/$$size=(\d+)$$(.*?)$$\/size$$/is', function($matches) {
             $size = intval($matches[1]);
             $size = max(10, min(36, $size));
             return '<span style="font-size:' . $size . 'px">' . $matches[2] . '</span>';
         }, $content);
 
-        // [url=URL]text[/url]
         $content = preg_replace_callback('/$$url=([^$$]+)\](.*?)$$\/url$$/is', function($matches) {
             $url = trim($matches[1]);
             if (preg_match('/^(javascript|data|vbscript):/i', $url)) {
@@ -289,7 +278,6 @@ function convertBBCodeToHTML($content) {
             return '<a href="' . $url . '" target="_blank" rel="noopener noreferrer" style="color:#2C5F8D;text-decoration:underline;">' . $matches[2] . '</a>';
         }, $content);
 
-        // [url]URL[/url]
         $content = preg_replace_callback('/$$url$$(.*?)$$\/url$$/is', function($matches) {
             $url = trim($matches[1]);
             if (preg_match('/^(javascript|data|vbscript):/i', $url)) {
@@ -298,7 +286,6 @@ function convertBBCodeToHTML($content) {
             return '<a href="' . $url . '" target="_blank" rel="noopener noreferrer" style="color:#2C5F8D;text-decoration:underline;">' . $url . '</a>';
         }, $content);
 
-        // [img]URL[/img]
         $content = preg_replace_callback('/$$img(?:=(\d+)x(\d+))?$$(.*?)$$\/img$$/is', function($matches) {
             $url = trim($matches[3]);
             $width = !empty($matches[1]) ? intval($matches[1]) : 640;
@@ -316,11 +303,9 @@ function convertBBCodeToHTML($content) {
             );
         }, $content);
 
-        // [video]URL[/video]
         $content = preg_replace_callback('/$$video$$(.*?)$$\/video$$/is', function($matches) {
             $url = trim($matches[1]);
 
-            // YouTube
             if (preg_match('/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/', $url, $match)) {
                 return sprintf(
                     '<div class="video-container" style="position:relative;padding-bottom:56.25%%;height:0;margin:15px 0;max-width:640px;">
@@ -330,7 +315,6 @@ function convertBBCodeToHTML($content) {
                 );
             }
 
-            // VK
             if (preg_match('/vk\.com\/video(-?\d+_\d+)/', $url, $match)) {
                 $parts = explode('_', $match[1]);
                 if (count($parts) === 2) {
@@ -347,7 +331,6 @@ function convertBBCodeToHTML($content) {
             return '[Неподдерживаемый формат видео]';
         }, $content);
 
-        // [quote]text[/quote]
         $content = preg_replace_callback('/$$quote(?:=([^$$]+))?\](.*?)$$\/quote$$/is', function($matches) {
             $author = !empty($matches[1]) ? '<strong>' . $matches[1] . ' написал(а):</strong><br>' : '';
             return sprintf(
@@ -357,7 +340,6 @@ function convertBBCodeToHTML($content) {
             );
         }, $content);
 
-        // [code]text[/code]
         $content = preg_replace_callback('/$$code$$(.*?)$$\/code$$/is', function($matches) {
             return sprintf(
                 '<pre style="background:#2D2D2D;color:#F8F8F2;padding:15px;border-radius:6px;overflow-x:auto;border:1px solid #444;font-family:monospace;font-size:13px;line-height:1.5;margin:10px 0;"><code>%s</code></pre>',
@@ -365,11 +347,9 @@ function convertBBCodeToHTML($content) {
             );
         }, $content);
 
-        // [list][*]item[/list]
         $content = preg_replace('/$$list$$(.*?)$$\/list$$/is', '<ul style="margin:10px 0;padding-left:30px;">$1</ul>', $content);
         $content = preg_replace('/$$\*$$(.*?)(?=$$\*$$|$$\/list$$|$)/is', '<li style="margin:5px 0;">$1</li>', $content);
 
-        // [spoiler]text[/spoiler]
         $content = preg_replace_callback('/$$spoiler(?:=([^$$]+))?\](.*?)$$\/spoiler$$/is', function($matches) {
             $title = !empty($matches[1]) ? $matches[1] : 'Спойлер';
             $id = 'spoiler_' . md5($matches[2]);
@@ -388,7 +368,6 @@ function convertBBCodeToHTML($content) {
             );
         }, $content);
 
-        // Переносы строк
         $content = nl2br($content);
 
         return $content;
@@ -412,8 +391,6 @@ try {
     $forumStructure = [];
 }
 
-// Извлекаем категории, форумы и группы
-$categories = isset($forumStructure['categories']) ? $forumStructure['categories'] : [];
 $forums = isset($forumStructure['forums']) ? $forumStructure['forums'] : [];
 $categoryGroups = isset($forumStructure['category_groups']) ? $forumStructure['category_groups'] : [];
 
@@ -561,16 +538,13 @@ if (!$isGuest) {
 // ГРУППИРОВКА ФОРУМОВ ПО КАТЕГОРИЯМ
 // ========================================
 
-// Сгруппируем форумы по is_cat (родительские категории)
 $parentCategories = [];
 $childForums = [];
 
 foreach ($forums as $forum) {
     if (isset($forum['is_cat']) && $forum['is_cat'] == '1') {
-        // Это родительская категория
         $parentCategories[$forum['forumid']] = $forum;
     } else {
-        // Это обычный форум
         $parentId = isset($forum['parentid']) ? $forum['parentid'] : '0';
         if (!isset($childForums[$parentId])) {
             $childForums[$parentId] = [];
@@ -655,14 +629,14 @@ foreach ($forums as $forum) {
             border-radius: 3px;
         }
 
-        .burger.active span:nth-child(1) { 
-            transform: rotate(45deg) translate(8px, 8px); 
+        .burger.active span:nth-child(1) {
+            transform: rotate(45deg) translate(8px, 8px);
         }
-        .burger.active span:nth-child(2) { 
-            opacity: 0; 
+        .burger.active span:nth-child(2) {
+            opacity: 0;
         }
-        .burger.active span:nth-child(3) { 
-            transform: rotate(-45deg) translate(7px, -7px); 
+        .burger.active span:nth-child(3) {
+            transform: rotate(-45deg) translate(7px, -7px);
         }
 
         nav ul {
@@ -721,8 +695,8 @@ foreach ($forums as $forum) {
             z-index: 999;
         }
 
-        .nav-overlay.active { 
-            display: block; 
+        .nav-overlay.active {
+            display: block;
         }
 
         main.container {
@@ -931,7 +905,7 @@ foreach ($forums as $forum) {
             border-radius: 3px;
             position: relative;
             display: block;
-            box-shadow: 
+            box-shadow:
                 0 1px 3px rgba(196, 167, 119, 0.3),
                 inset 0 1px 0 rgba(255,255,255,0.5);
         }
@@ -953,7 +927,7 @@ foreach ($forums as $forum) {
         .subforum-item.has-new .subforum-icon::before {
             background: linear-gradient(135deg, #FFF8E7 0%, #F0E5D0 100%);
             border-color: #D4B068;
-            box-shadow: 
+            box-shadow:
                 0 1px 4px rgba(212, 176, 104, 0.4),
                 inset 0 1px 0 rgba(255,255,255,0.7),
                 0 0 8px rgba(212, 176, 104, 0.2);
@@ -1289,8 +1263,8 @@ foreach ($forums as $forum) {
         }
 
         @media (max-width: 1024px) {
-            .header-image { 
-                height: 300px; 
+            .header-image {
+                height: 300px;
             }
         }
 
@@ -1300,11 +1274,11 @@ foreach ($forums as $forum) {
                 box-shadow: none;
             }
 
-            .header-image { 
+            .header-image {
                 height: 200px;
             }
 
-            .burger { 
+            .burger {
                 display: flex;
                 left: 15px;
                 padding: 15px 10px;
@@ -1327,8 +1301,8 @@ foreach ($forums as $forum) {
                 align-items: stretch;
             }
 
-            nav ul.active { 
-                right: 0; 
+            nav ul.active {
+                right: 0;
             }
 
             nav ul li {
@@ -1358,7 +1332,7 @@ foreach ($forums as $forum) {
                 border-radius: 8px 8px 0 0;
             }
 
-            .mini-nav-left, 
+            .mini-nav-left,
             .mini-nav-right {
                 width: 100%;
                 flex-direction: column;
@@ -1444,8 +1418,8 @@ foreach ($forums as $forum) {
                 font-size: 11px;
             }
 
-            .header-image { 
-                height: 120px; 
+            .header-image {
+                height: 120px;
             }
         }
     </style>
@@ -1530,15 +1504,14 @@ foreach ($forums as $forum) {
         </div>
 
         <?php if (!empty($parentCategories)): ?>
-            <?php 
-            // Сортируем родительские категории по order
+            <?php
             uasort($parentCategories, function($a, $b) {
                 $orderA = isset($a['order']) ? intval($a['order']) : 999;
                 $orderB = isset($b['order']) ? intval($b['order']) : 999;
                 return $orderA - $orderB;
             });
 
-            foreach ($parentCategories as $parentId => $parentCat): 
+            foreach ($parentCategories as $parentId => $parentCat):
                 $children = isset($childForums[$parentId]) ? $childForums[$parentId] : [];
                 if (empty($children)) continue;
             ?>
@@ -1556,16 +1529,14 @@ foreach ($forums as $forum) {
                         </div>
                     </header>
                     <div class="subforum-list">
-                        <?php foreach ($children as $forum): 
+                        <?php foreach ($children as $forum):
                             $forumId = $forum['forumid'];
 
-                            // Подсчет тем в этом форуме
                             $forumTopics = array_filter($topics, function($topic) use ($forumId) {
                                 return isset($topic['category_id']) && $topic['category_id'] == $forumId;
                             });
                             $topicsCount = count($forumTopics);
 
-                            // Подсчет сообщений
                             $postsCount = 0;
                             foreach ($forumTopics as $topic) {
                                 $topicPosts = array_filter($posts, function($post) use ($topic) {
@@ -1574,7 +1545,6 @@ foreach ($forums as $forum) {
                                 $postsCount += count($topicPosts);
                             }
 
-                            // Последнее сообщение
                             $lastPost = null;
                             $lastPostTopic = null;
 
@@ -1619,7 +1589,7 @@ foreach ($forums as $forum) {
                                 <div class="subforum-last-activity">
                                     <?php if ($lastPost): ?>
                                         <div>
-                                            Последний ответ от 
+                                            Последний ответ от
                                             <a href="forum_user_profile.php?id=<?php echo $lastPost['user_id']; ?>" onclick="event.stopPropagation()">
                                                 <?php echo safe_htmlspecialchars(getUserName($lastPost['user_id'], $db)); ?>
                                             </a>
@@ -1627,7 +1597,7 @@ foreach ($forums as $forum) {
                                         <?php if ($lastPostTopic): ?>
                                         <div>
                                             <a href="forum_topic.php?id=<?php echo $lastPostTopic['id']; ?>" onclick="event.stopPropagation()" title="<?php echo safe_htmlspecialchars($lastPostTopic['title']); ?>">
-                                                <?php 
+                                                <?php
                                                 $topicTitle = $lastPostTopic['title'];
                                                 if (mb_strlen($topicTitle, 'UTF-8') > 30) {
                                                     $topicTitle = mb_substr($topicTitle, 0, 30, 'UTF-8') . '...';
@@ -1698,7 +1668,7 @@ foreach ($forums as $forum) {
                     </h4>
                     <div class="info-block-content">
                         <?php if ($lastPost): ?>
-                            <?php 
+                            <?php
                             $postContentHTML = convertBBCodeToHTML($lastPost['content']);
                             $postPreview = strip_tags($postContentHTML);
                             if (mb_strlen($postPreview, 'UTF-8') > 100) {
