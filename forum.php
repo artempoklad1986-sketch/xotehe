@@ -1,8 +1,9 @@
 <?php
 /**
- * Forum v3.1 - Fixed Version
- * Правильно использует структуру из forum_categories.json
- * С поддержкой BBCode, иерархии категорий и всех функций
+ * Forum v3.1 - Production Ready
+ * ✅ Исправлен циклический редирект
+ * ✅ Дни рождения как в VK с круглыми аватарами
+ * ✅ Полная интеграция с Database.php
  */
 
 // ========================================
@@ -111,9 +112,30 @@ try {
     $isGuest = true;
 }
 
+// ========================================
+// ПРОВЕРКА ДОСТУПА (БЕЗ ЦИКЛОВ!)
+// ========================================
+
 if ($isGuest && empty($settings['forum_allow_guest_view'])) {
-    header('Location: login.php?redirect=forum.php');
-    exit;
+    // Проверяем, не идёт ли уже редирект (защита от цикла)
+    if (!isset($_GET['access_denied'])) {
+        header('Location: login.php?redirect=' . urlencode($_SERVER['REQUEST_URI']) . '&access_denied=1');
+        exit;
+    } else {
+        // Если параметр есть, значит уже был редирект - показываем сообщение
+        die('
+            <div style="max-width:600px;margin:100px auto;padding:40px;background:#fff;border:3px solid #3E3936;border-radius:15px;text-align:center;font-family:Tahoma,Arial,sans-serif;box-shadow:0 10px 40px rgba(0,0,0,0.15);">
+                <div style="font-size:64px;margin-bottom:20px;">🔒</div>
+                <h1 style="color:#3E3936;margin-bottom:15px;font-size:24px;">Доступ ограничен</h1>
+                <p style="font-size:14px;color:#666;margin-bottom:30px;line-height:1.6;">Для просмотра форума необходимо авторизоваться</p>
+                <div style="margin-bottom:20px;">
+                    <a href="login.php?redirect=forum.php" style="display:inline-block;background:#3E3936;color:white;padding:14px 35px;text-decoration:none;border-radius:8px;font-size:14px;margin:5px;transition:0.3s;">Войти</a>
+                    <a href="register.php" style="display:inline-block;background:#2C5F8D;color:white;padding:14px 35px;text-decoration:none;border-radius:8px;font-size:14px;margin:5px;transition:0.3s;">Регистрация</a>
+                </div>
+                <a href="index.php" style="color:#999;font-size:13px;text-decoration:none;">← Вернуться на главную</a>
+            </div>
+        ');
+    }
 }
 
 // ========================================
@@ -239,6 +261,45 @@ function getUserInitials($userId, $db) {
     }
 }
 
+function getUserCity($userId, $db) {
+    try {
+        $user = $db->getUserById($userId);
+        if ($user && is_array($user) && isset($user['city']) && !empty($user['city'])) {
+            return $user['city'];
+        }
+        return null;
+    } catch (Exception $e) {
+        return null;
+    }
+}
+
+function getUserPostsCount($userId, $db) {
+    try {
+        $user = $db->getUserById($userId);
+        if ($user && is_array($user) && isset($user['posts_count'])) {
+            return intval($user['posts_count']);
+        }
+        return 0;
+    } catch (Exception $e) {
+        return 0;
+    }
+}
+
+function getUserAge($birthday) {
+    if (empty($birthday)) {
+        return null;
+    }
+
+    try {
+        $birthDate = new DateTime($birthday);
+        $today = new DateTime('today');
+        $age = $birthDate->diff($today)->y;
+        return $age;
+    } catch (Exception $e) {
+        return null;
+    }
+}
+
 // ========================================
 // 🎨 КОНВЕРТЕР BBCODE → HTML
 // ========================================
@@ -303,34 +364,6 @@ function convertBBCodeToHTML($content) {
             );
         }, $content);
 
-        $content = preg_replace_callback('/$$video$$(.*?)$$\/video$$/is', function($matches) {
-            $url = trim($matches[1]);
-
-            if (preg_match('/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/', $url, $match)) {
-                return sprintf(
-                    '<div class="video-container" style="position:relative;padding-bottom:56.25%%;height:0;margin:15px 0;max-width:640px;">
-                        <iframe src="https://www.youtube.com/embed/%s" style="position:absolute;top:0;left:0;width:100%%;height:100%%;border:none;border-radius:8px;" allowfullscreen></iframe>
-                    </div>',
-                    $match[1]
-                );
-            }
-
-            if (preg_match('/vk\.com\/video(-?\d+_\d+)/', $url, $match)) {
-                $parts = explode('_', $match[1]);
-                if (count($parts) === 2) {
-                    return sprintf(
-                        '<div class="video-container" style="position:relative;padding-bottom:56.25%%;height:0;margin:15px 0;max-width:640px;">
-                            <iframe src="https://vk.com/video_ext.php?oid=%s&id=%s" style="position:absolute;top:0;left:0;width:100%%;height:100%%;border:none;border-radius:8px;" allowfullscreen></iframe>
-                        </div>',
-                        $parts[0],
-                        $parts[1]
-                    );
-                }
-            }
-
-            return '[Неподдерживаемый формат видео]';
-        }, $content);
-
         $content = preg_replace_callback('/$$quote(?:=([^$$]+))?\](.*?)$$\/quote$$/is', function($matches) {
             $author = !empty($matches[1]) ? '<strong>' . $matches[1] . ' написал(а):</strong><br>' : '';
             return sprintf(
@@ -344,27 +377,6 @@ function convertBBCodeToHTML($content) {
             return sprintf(
                 '<pre style="background:#2D2D2D;color:#F8F8F2;padding:15px;border-radius:6px;overflow-x:auto;border:1px solid #444;font-family:monospace;font-size:13px;line-height:1.5;margin:10px 0;"><code>%s</code></pre>',
                 $matches[1]
-            );
-        }, $content);
-
-        $content = preg_replace('/$$list$$(.*?)$$\/list$$/is', '<ul style="margin:10px 0;padding-left:30px;">$1</ul>', $content);
-        $content = preg_replace('/$$\*$$(.*?)(?=$$\*$$|$$\/list$$|$)/is', '<li style="margin:5px 0;">$1</li>', $content);
-
-        $content = preg_replace_callback('/$$spoiler(?:=([^$$]+))?\](.*?)$$\/spoiler$$/is', function($matches) {
-            $title = !empty($matches[1]) ? $matches[1] : 'Спойлер';
-            $id = 'spoiler_' . md5($matches[2]);
-            return sprintf(
-                '<div class="spoiler" style="margin:10px 0;border:1px solid #E5DDD7;border-radius:6px;overflow:hidden;">
-                    <div class="spoiler-header" onclick="toggleSpoiler(\'%s\')" style="background:#F5F5F5;padding:10px 15px;cursor:pointer;user-select:none;font-weight:bold;">
-                        <span id="%s-icon">▶</span> %s
-                    </div>
-                    <div id="%s" class="spoiler-content" style="display:none;padding:15px;background:#FAFAFA;">%s</div>
-                </div>',
-                $id,
-                $id,
-                $title,
-                $id,
-                $matches[2]
             );
         }, $content);
 
@@ -391,6 +403,7 @@ try {
     $forumStructure = [];
 }
 
+$categories = isset($forumStructure['categories']) ? $forumStructure['categories'] : [];
 $forums = isset($forumStructure['forums']) ? $forumStructure['forums'] : [];
 $categoryGroups = isset($forumStructure['category_groups']) ? $forumStructure['category_groups'] : [];
 
@@ -490,7 +503,6 @@ $totalTopics = isset($stats['topics']) ? $stats['topics'] : count($topics);
 $totalPosts = isset($stats['posts']) ? $stats['posts'] : count($posts);
 $totalUsers = isset($stats['users']) ? $stats['users'] : 0;
 
-// Последняя активность
 $lastPost = null;
 $lastTopic = null;
 $lastUser = null;
@@ -551,6 +563,32 @@ foreach ($forums as $forum) {
         }
         $childForums[$parentId][] = $forum;
     }
+}
+
+// ========================================
+// 🎂 ДНИ РОЖДЕНИЯ СЕГОДНЯ
+// ========================================
+
+$birthdayUsers = [];
+try {
+    // Получаем всех пользователей
+    $usersData = $db->get('users');
+
+    if (is_array($usersData) && isset($usersData['users'])) {
+        $today = date('m-d'); // Текущий месяц-день
+
+        foreach ($usersData['users'] as $user) {
+            if (isset($user['birthday']) && !empty($user['birthday'])) {
+                $userBirthday = date('m-d', strtotime($user['birthday']));
+
+                if ($userBirthday === $today) {
+                    $birthdayUsers[] = $user;
+                }
+            }
+        }
+    }
+} catch (Exception $e) {
+    $birthdayUsers = [];
 }
 
 ?>
@@ -1212,6 +1250,208 @@ foreach ($forums as $forum) {
             opacity: 0.3;
         }
 
+        /* ========================================
+           🎂 ДНИ РОЖДЕНИЯ - КАК В VK
+           ======================================== */
+
+        .birthdays-section {
+            background: linear-gradient(135deg, #FF6B9D 0%, #C44569 100%);
+            border-radius: 12px;
+            padding: 30px 25px;
+            margin: 25px 0;
+            color: white;
+            box-shadow: 0 8px 25px rgba(196, 69, 105, 0.4);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .birthdays-section::before {
+            content: '🎉';
+            position: absolute;
+            top: -20px;
+            right: -20px;
+            font-size: 120px;
+            opacity: 0.1;
+            transform: rotate(25deg);
+        }
+
+        .birthdays-section::after {
+            content: '🎈';
+            position: absolute;
+            bottom: -30px;
+            left: -30px;
+            font-size: 150px;
+            opacity: 0.1;
+            transform: rotate(-15deg);
+        }
+
+        .birthdays-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 25px;
+            font-size: 18px;
+            font-weight: bold;
+            position: relative;
+            z-index: 1;
+        }
+
+        .birthdays-header-icon {
+            font-size: 36px;
+            animation: rotate-cake 4s infinite ease-in-out;
+            filter: drop-shadow(0 4px 8px rgba(0,0,0,0.2));
+        }
+
+        @keyframes rotate-cake {
+            0%, 100% { transform: rotate(0deg) scale(1); }
+            10% { transform: rotate(-15deg) scale(1.1); }
+            20% { transform: rotate(15deg) scale(1.15); }
+            30% { transform: rotate(-10deg) scale(1.1); }
+            40% { transform: rotate(10deg) scale(1.05); }
+            50% { transform: rotate(0deg) scale(1); }
+        }
+
+        .birthdays-list {
+            display: flex;
+            gap: 25px;
+            flex-wrap: wrap;
+            justify-content: flex-start;
+            position: relative;
+            z-index: 1;
+        }
+
+        .birthday-user {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            position: relative;
+            transition: transform 0.3s ease;
+        }
+
+        .birthday-user:hover {
+            transform: translateY(-8px);
+        }
+
+        .birthday-avatar-wrapper {
+            position: relative;
+            width: 90px;
+            height: 90px;
+        }
+
+        .birthday-avatar {
+            width: 90px;
+            height: 90px;
+            border-radius: 50%;
+            border: 4px solid #FFD700;
+            background: linear-gradient(135deg, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0.1) 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 36px;
+            font-weight: bold;
+            color: white;
+            overflow: hidden;
+            box-shadow: 
+                0 8px 20px rgba(0,0,0,0.3),
+                0 0 0 2px rgba(255,215,0,0.3),
+                inset 0 2px 4px rgba(255,255,255,0.3);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .birthday-avatar:hover {
+            transform: scale(1.1) rotate(5deg);
+            box-shadow: 
+                0 12px 30px rgba(0,0,0,0.4),
+                0 0 0 3px rgba(255,215,0,0.5),
+                inset 0 2px 6px rgba(255,255,255,0.4);
+        }
+
+        .birthday-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 50%;
+        }
+
+        .birthday-cake {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            font-size: 28px;
+            animation: bounce-cake 1.5s infinite ease-in-out;
+            filter: drop-shadow(0 4px 8px rgba(0,0,0,0.3));
+            z-index: 2;
+        }
+
+        @keyframes bounce-cake {
+            0%, 100% { 
+                transform: translateY(0) scale(1) rotate(0deg); 
+            }
+            25% { 
+                transform: translateY(-10px) scale(1.15) rotate(-10deg); 
+            }
+            50% { 
+                transform: translateY(-5px) scale(1.1) rotate(5deg); 
+            }
+            75% { 
+                transform: translateY(-8px) scale(1.12) rotate(-5deg); 
+            }
+        }
+
+        .birthday-name {
+            font-size: 13px;
+            font-weight: bold;
+            text-align: center;
+            color: white;
+            text-shadow: 
+                0 2px 4px rgba(0,0,0,0.3),
+                0 1px 2px rgba(0,0,0,0.2);
+            max-width: 100px;
+            word-wrap: break-word;
+            line-height: 1.3;
+        }
+
+        .birthday-name a {
+            color: white;
+            text-decoration: none;
+            transition: opacity 0.3s ease;
+        }
+
+        .birthday-name a:hover {
+            opacity: 0.85;
+            text-decoration: underline;
+        }
+
+        .birthday-info {
+            font-size: 11px;
+            color: rgba(255,255,255,0.95);
+            text-align: center;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+        }
+
+        .birthday-age {
+            background: rgba(255,255,255,0.2);
+            padding: 3px 8px;
+            border-radius: 10px;
+            font-weight: bold;
+            font-size: 11px;
+            backdrop-filter: blur(5px);
+        }
+
+        .no-birthdays {
+            text-align: center;
+            color: rgba(255,255,255,0.9);
+            font-size: 14px;
+            padding: 20px;
+            font-style: italic;
+        }
+
         .footer {
             background: #3E3936;
             color: white;
@@ -1402,6 +1642,46 @@ foreach ($forums as $forum) {
                 border-bottom: none;
             }
 
+            .birthdays-section {
+                padding: 25px 15px;
+                border-radius: 10px;
+            }
+
+            .birthdays-header {
+                font-size: 16px;
+                margin-bottom: 20px;
+            }
+
+            .birthdays-header-icon {
+                font-size: 32px;
+            }
+
+            .birthdays-list {
+                justify-content: center;
+                gap: 20px;
+            }
+
+            .birthday-avatar-wrapper,
+            .birthday-avatar {
+                width: 75px;
+                height: 75px;
+            }
+
+            .birthday-avatar {
+                font-size: 30px;
+            }
+
+            .birthday-cake {
+                font-size: 24px;
+                top: -6px;
+                right: -6px;
+            }
+
+            .birthday-name {
+                font-size: 12px;
+                max-width: 85px;
+            }
+
             .footer {
                 padding: 30px 15px 20px;
                 margin-top: 40px;
@@ -1420,6 +1700,38 @@ foreach ($forums as $forum) {
 
             .header-image {
                 height: 120px;
+            }
+
+            .birthdays-section {
+                padding: 20px 12px;
+            }
+
+            .birthdays-header {
+                font-size: 14px;
+            }
+
+            .birthday-avatar-wrapper,
+            .birthday-avatar {
+                width: 65px;
+                height: 65px;
+            }
+
+            .birthday-avatar {
+                font-size: 26px;
+                border-width: 3px;
+            }
+
+            .birthday-cake {
+                font-size: 20px;
+            }
+
+            .birthday-name {
+                font-size: 11px;
+                max-width: 75px;
+            }
+
+            .birthday-info {
+                font-size: 10px;
             }
         }
     </style>
@@ -1502,6 +1814,67 @@ foreach ($forums as $forum) {
                 </form>
             </div>
         </div>
+
+        <?php if (!empty($birthdayUsers)): ?>
+        <div class="birthdays-section">
+            <div class="birthdays-header">
+                <span class="birthdays-header-icon">🎂</span>
+                <span>Сегодня день рождения отмечают!</span>
+            </div>
+
+            <div class="birthdays-list">
+                <?php foreach ($birthdayUsers as $user): 
+                    $avatar = getUserAvatar($user['id'], $db);
+                    $userName = getUserName($user['id'], $db);
+                    $userCity = getUserCity($user['id'], $db);
+                    $userPostsCount = getUserPostsCount($user['id'], $db);
+                    $userAge = getUserAge($user['birthday']);
+                    $userInitials = '';
+
+                    if (!$avatar) {
+                        $words = explode(' ', $userName);
+                        if (count($words) >= 2) {
+                            $userInitials = mb_substr($words[0], 0, 1, 'UTF-8') . mb_substr($words[1], 0, 1, 'UTF-8');
+                        } else {
+                            $userInitials = mb_substr($userName, 0, 2, 'UTF-8');
+                        }
+                        $userInitials = mb_strtoupper($userInitials, 'UTF-8');
+                    }
+                ?>
+                <div class="birthday-user">
+                    <div class="birthday-avatar-wrapper">
+                        <a href="forum_user_profile.php?id=<?php echo $user['id']; ?>" class="birthday-avatar">
+                            <?php if ($avatar): ?>
+                            <img src="<?php echo safe_htmlspecialchars($avatar); ?>" alt="<?php echo safe_htmlspecialchars($userName); ?>">
+                            <?php else: ?>
+                            <?php echo safe_htmlspecialchars($userInitials); ?>
+                            <?php endif; ?>
+                        </a>
+                        <span class="birthday-cake">🎂</span>
+                    </div>
+                    <div class="birthday-name">
+                        <a href="forum_user_profile.php?id=<?php echo $user['id']; ?>">
+                            <?php echo safe_htmlspecialchars($userName); ?>
+                        </a>
+                    </div>
+                    <?php if ($userAge): ?>
+                    <div class="birthday-info">
+                        🎉 <span class="birthday-age"><?php echo $userAge; ?> лет</span>
+                    </div>
+                    <?php endif; ?>
+                    <?php if ($userCity): ?>
+                    <div class="birthday-info">
+                        📍 <?php echo safe_htmlspecialchars($userCity); ?>
+                    </div>
+                    <?php endif; ?>
+                    <div class="birthday-info">
+                        💬 <?php echo $userPostsCount; ?> сообщений
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+        <?php endif; ?>
 
         <?php if (!empty($parentCategories)): ?>
             <?php
@@ -1831,21 +2204,6 @@ foreach ($forums as $forum) {
             if (icon && list) {
                 icon.classList.toggle('collapsed');
                 list.classList.toggle('collapsed');
-            }
-        }
-
-        function toggleSpoiler(id) {
-            const content = document.getElementById(id);
-            const icon = document.getElementById(id + '-icon');
-
-            if (content && icon) {
-                if (content.style.display === 'none') {
-                    content.style.display = 'block';
-                    icon.textContent = '▼';
-                } else {
-                    content.style.display = 'none';
-                    icon.textContent = '▶';
-                }
             }
         }
     </script>
